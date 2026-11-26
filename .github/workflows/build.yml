@@ -22,14 +22,10 @@ jobs:
         run: |
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export ANDROID_SDK_ROOT=$ANDROID_HOME
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
-          echo "=== SDK platforms ==="
-          ls $ANDROID_HOME/platforms/ || true
-          echo "=== SDK build-tools ==="
+          export PATH=$PATH:$ANDROID_HOME/platform-tools
+          echo "=== build-tools ==="
           ls $ANDROID_HOME/build-tools/ || true
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace --offline || \
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         if: always()
