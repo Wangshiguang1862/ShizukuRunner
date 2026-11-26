@@ -50,36 +50,46 @@ public class Exec extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    super.onCreate(savedInstanceState);
+    String cmd = getIntent().getStringExtra("content");
+    if (cmd == null || cmd.isEmpty()) {
+        // 没有命令就当普通启动，走原来的界面
         setTitle("执行中");
-
-        //根据系统深色模式动态改变深色主题
-        if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode() == UiModeManager.MODE_NIGHT_NO)
+        if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES)
             setTheme(android.R.style.Theme_DeviceDefault_Light_Dialog);
-
-        //半透明背景
         getWindow().getAttributes().alpha = 0.85f;
         setContentView(R.layout.exec);
         t1 = findViewById(R.id.t1);
         t2 = findViewById(R.id.t2);
-t2.requestFocus();
+        t2.requestFocus();
         t2.setOnKeyListener(new View.OnKeyListener() {
             @Override
             public boolean onKey(View view, int i, KeyEvent keyEvent) {
-                if (keyEvent.getKeyCode()==KeyEvent.KEYCODE_ENTER&&keyEvent.getAction()==KeyEvent.ACTION_DOWN)
+                if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                        && keyEvent.getAction() == KeyEvent.ACTION_UP) {
                     finish();
+                }
                 return false;
             }
         });
-        //子线程执行命令，否则UI线程执行就会导致UI卡住动不了
-        h1 = new Thread(new Runnable() {
+        new Thread(new Runnable() {
             @Override
             public void run() {
                 ShizukuExec(getIntent().getStringExtra("content"));
             }
-        });
-        h1.start();
+        }).start();
+        return;
     }
+    // 有 content 传入：静默执行，不显示任何界面
+    new Thread(new Runnable() {
+        @Override
+        public void run() {
+            ShizukuExec(cmd);
+            finish();
+        }
+    }).start();
+}
 
     public void ShizukuExec(String cmd) {
         try {
