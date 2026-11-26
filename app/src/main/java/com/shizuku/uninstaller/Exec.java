@@ -44,8 +44,9 @@ public class Exec extends Activity {
         public void handleMessage(Message msg) {
 
             //msg.what 是1就是错误信息，是2是正常信息
-            mOuter.get().t2.append(msg.what == 1 ? (SpannableString)msg.obj : String.valueOf(msg.obj));
-        }
+    if (mOuter.get().t2 != null)
+    mOuter.get().t2.append(msg.what == 1 ? (SpannableString)msg.obj : String.valueOf(msg.obj));
+
     }
 
     @Override
