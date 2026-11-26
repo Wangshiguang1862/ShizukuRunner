@@ -18,9 +18,10 @@
             </intent-filter>
         </activity>
         <activity
-            android:name=".Exec"
-            android:exported="true"
-            android:excludeFromRecents="true"/>
+    android:name=".Exec"
+    android:theme="@android:style/Theme.Translucent.NoTitleBar"
+    android:excludeFromRecents="true"
+    android:noHistory="true" />
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
