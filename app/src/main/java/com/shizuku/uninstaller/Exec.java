@@ -35,25 +35,29 @@ public class Exec extends Activity {
         // ... 你原有的 Shizuku 授权检查 + ShizukuExec 执行代码，原样接在这里 ...
     }
 
-    private void runPlain(String cmd) {
+        private void runPlain(String cmd) {
+        String result;
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", cmd});
-            BufferedReader br =
-                new BufferedReader(new InputStreamReader(p.getInputStream()));
+            java.io.BufferedReader br =
+                new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream()));
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = br.readLine()) != null) sb.append(line).append('\n');
+            br.close();
             p.waitFor();
-            // 结果写进 App 私有目录（不需要任何存储权限）
-            try (java.io.FileWriter fw =
-                    new java.io.FileWriter(getFilesDir() + "/plain_result.txt")) {
-                fw.write("cmd=" + cmd + "\nexit=" + p.exitValue() + "\nout=" + sb);
-            }
+            result = "cmd=" + cmd + "\nexit=" + p.exitValue() + "\nout=" + sb;
         } catch (Throwable t) {
-            try (java.io.FileWriter fw =
-                    new java.io.FileWriter(getFilesDir() + "/plain_result.txt")) {
-                fw.write("ERR: " + t);
-            }
+            result = "ERR: " + t;
+        }
+        try {
+            java.io.FileWriter fw =
+                new java.io.FileWriter(getFilesDir() + "/plain_result.txt");
+            fw.write(result);
+            fw.close();
+        } catch (Throwable ignored) {}
+            
         }
     }
 }
