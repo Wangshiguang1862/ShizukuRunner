@@ -27,7 +27,9 @@ jobs:
         run: |
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export ANDROID_SDK_ROOT=$ANDROID_HOME
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleDebug --no-daemon --stacktrace --refresh-dependencies \
+            || gradle assembleDebug --no-daemon --stacktrace --refresh-dependencies \
+            || gradle assembleDebug --no-daemon --stacktrace --offline
 
       - name: Upload APK
         if: always()
