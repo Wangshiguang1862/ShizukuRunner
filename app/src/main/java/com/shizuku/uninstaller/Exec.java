@@ -16,11 +16,11 @@ public class Exec extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Intent intent = getIntent();
-String content = intent == null ? null : intent.getStringExtra("content");
-if (content != null && content.startsWith("js:")) {
-    JsRunner.run(this, content.substring(3));
-    finish();
-    return;
+        String content = intent == null ? null : intent.getStringExtra("content");
+        if (content != null && content.startsWith("js:")) {
+        JsRunner.run(this, content.substring(3));
+        finish();
+        return;
 }
         Intent intent = getIntent();
         String content = intent == null ? null : intent.getStringExtra("content");
