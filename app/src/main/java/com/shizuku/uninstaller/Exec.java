@@ -1,8 +1,9 @@
- package com.shizuku.uninstaller;
+package com.shizuku.uninstaller;
 
 import android.app.Activity;
 import android.app.Service;
 import android.app.UiModeManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -25,7 +26,7 @@ public class Exec extends Activity {
 
     TextView t1, t2;
     Process p;
-    Thread h1, h2, h3;
+    Thread h2, h3;
     boolean br = false;
 
     protected MyHandler mHandler = new MyHandler(this);
@@ -38,21 +39,33 @@ public class Exec extends Activity {
         }
 
         @Override
-         protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-                try {
-            Shizuku.newProcess(
-                new String[]{"settings", "put", "system", "screen_off_timeout", "99999"},
-                null, null).waitFor();
-        } catch (Exception ignored) {}
+        public void handleMessage(Message msg) {
+            Exec a = mOuter.get();
+            if (a == null || a.t2 == null) return;
+            a.t2.append(msg.what == 1
+                    ? (SpannableString) msg.obj
+                    : String.valueOf(msg.obj));
+        }
+    }
 
-}
-        String cmd = getIntent().getStringExtra("content");
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // 执行前把屏幕超时改长，防止息屏打断
+        try {
+            Shizuku.newProcess(
+                    new String[]{"settings", "put", "system", "screen_off_timeout", "99999"},
+                    null, null).waitFor();
+        } catch (Exception ignored) {
+        }
+
+        final String cmd = getIntent().getStringExtra("content");
 
         if (cmd == null || cmd.isEmpty()) {
             setTitle("执行中");
             if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
-                    == android.content.res.Configuration.UI_MODE_NIGHT_YES) {
+                    == Configuration.UI_MODE_NIGHT_NO) {
                 setTheme(android.R.style.Theme_DeviceDefault_Light_Dialog);
             }
             getWindow().getAttributes().alpha = 0.85f;
@@ -73,12 +86,13 @@ public class Exec extends Activity {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    ShizukuExec(getIntent().getStringExtra("content"));
+                    ShizukuExec(cmd);
                 }
             }).start();
             return;
         }
 
+        // 有 content 时静默执行，不建界面
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -90,7 +104,7 @@ public class Exec extends Activity {
 
     public void ShizukuExec(String cmd) {
         final boolean silent = (t2 == null);
-        long time = System.currentTimeMillis();
+        final long time = System.currentTimeMillis();
         try {
             p = Shizuku.newProcess(new String[]{"sh"}, null, null);
             OutputStream out = p.getOutputStream();
@@ -106,7 +120,7 @@ public class Exec extends Activity {
                                 new InputStreamReader(p.getInputStream()));
                         String inline;
                         while ((inline = mReader.readLine()) != null) {
-                            if (silent) continue;
+                            if (silent) break;
                             if (t2.length() > 2000 || br) break;
                             Message msg = new Message();
                             msg.what = 0;
@@ -128,7 +142,7 @@ public class Exec extends Activity {
                                 new InputStreamReader(p.getErrorStream()));
                         String inline;
                         while ((inline = mReader.readLine()) != null) {
-                            if (silent) continue;
+                            if (silent) break;
                             if (t2.length() > 2000 || br) break;
                             Message msg = new Message();
                             msg.what = 1;
@@ -180,7 +194,6 @@ public class Exec extends Activity {
                             p.destroy();
                         }
                     }
-                    if (h1 != null) h1.interrupt();
                     if (h2 != null) h2.interrupt();
                     if (h3 != null) h3.interrupt();
                 } catch (Exception ignored) {
@@ -189,5 +202,4 @@ public class Exec extends Activity {
         }, 1000);
         super.onDestroy();
     }
-
 }
