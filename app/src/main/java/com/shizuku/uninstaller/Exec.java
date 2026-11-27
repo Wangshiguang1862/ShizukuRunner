@@ -12,16 +12,28 @@ import rikka.shizuku.Shizuku;
 
 public class Exec extends Activity {
 
-    @Override
+        @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Intent intent = getIntent();
         String content = intent == null ? null : intent.getStringExtra("content");
+
+        // ==== JS 扩展分支（新增，只认 js: 前缀）====
         if (content != null && content.startsWith("js:")) {
-        JsRunner.run(this, content.substring(3));
-        finish();
-        return;
+            JsRunner.run(this, content.substring(3));
+            finish();
+            return;
+        }
+        // ==== JS 分支结束，以下原版逻辑一字不动 ====
+
+        if (!Shizuku.pingBinder()) {
+            Toast.makeText(this, "Shizuku not ready", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+        // ... 你原有的 Shizuku 授权检查 + ShizukuExec 执行代码，原样接在这里 ...
     }
+    
         Intent intent = getIntent();
         String content = intent == null ? null : intent.getStringExtra("content");
 
