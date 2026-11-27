@@ -29,6 +29,10 @@ public class Exec extends Activity {
     Thread h2, h3;
     boolean br = false;
 
+    /* 记录进入时的息屏超时，退出时恢复；读不到就用 1 分钟 */
+    String originalTimeout = "60000";
+    boolean timeoutChanged = false;
+
     protected MyHandler mHandler = new MyHandler(this);
 
     public static class MyHandler extends Handler {
@@ -52,11 +56,26 @@ public class Exec extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 执行前把屏幕超时改长，防止息屏打断
+        // 先记住用户原来的息屏时间
+        try {
+            Process gp = Shizuku.newProcess(
+                    new String[]{"settings", "get", "system", "screen_off_timeout"}, null, null);
+            BufferedReader gr = new BufferedReader(new InputStreamReader(gp.getInputStream()));
+            String line = gr.readLine();
+            if (line != null && line.trim().matches("\\d+")) {
+                originalTimeout = line.trim();
+            }
+            gr.close();
+            gp.waitFor();
+        } catch (Exception ignored) {
+        }
+
+        // 执行期间把屏幕超时改长，防止息屏打断
         try {
             Shizuku.newProcess(
                     new String[]{"settings", "put", "system", "screen_off_timeout", "99999"},
                     null, null).waitFor();
+            timeoutChanged = true;
         } catch (Exception ignored) {
         }
 
@@ -181,8 +200,20 @@ public class Exec extends Activity {
     }
 
     @Override
-    public void onDestroy() {
+    protected void onDestroy() {
         br = true;
+
+        // 恢复用户原来的息屏时间
+        if (timeoutChanged) {
+            try {
+                Shizuku.newProcess(
+                        new String[]{"settings", "put", "system", "screen_off_timeout", originalTimeout},
+                        null, null).waitFor();
+            } catch (Exception ignored) {
+            }
+            timeoutChanged = false;
+        }
+
         new Handler().postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -200,6 +231,7 @@ public class Exec extends Activity {
                 }
             }
         }, 1000);
+
         super.onDestroy();
     }
 }
