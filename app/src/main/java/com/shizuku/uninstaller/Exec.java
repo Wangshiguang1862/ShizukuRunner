@@ -21,7 +21,7 @@ public class Exec extends Activity {
         JsRunner.run(this, content.substring(3));
         finish();
         return;
-}
+    }
         Intent intent = getIntent();
         String content = intent == null ? null : intent.getStringExtra("content");
 
