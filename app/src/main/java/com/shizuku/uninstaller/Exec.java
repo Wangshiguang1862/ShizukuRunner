@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Service;
 import android.app.UiModeManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
@@ -34,6 +35,21 @@ public class Exec extends Activity {
 
     String originalTimeout = "60000";
     boolean timeoutChanged = false;
+
+    /** 授权结果回调：用户点完弹窗后继续执行命令 */
+    private final Shizuku.OnRequestPermissionResultListener permListener =
+            new Shizuku.OnRequestPermissionResultListener() {
+                @Override
+                public void onRequestPermissionResult(int requestCode, int grantResult) {
+                    log("perm result, granted=" + (grantResult == PackageManager.PERMISSION_GRANTED));
+                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                        runCmdFromIntent(getIntent(), false);
+                    } else {
+                        log("permission denied by user");
+                        finish();
+                    }
+                }
+            };
 
     protected MyHandler mHandler = new MyHandler(this);
 
@@ -67,7 +83,12 @@ public class Exec extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         log("onCreate, taskId=" + getTaskId());
-        runCmdFromIntent(getIntent());
+        try {
+            Shizuku.addRequestPermissionResultListener(permListener);
+        } catch (Exception e) {
+            log("add perm listener failed: " + e);
+        }
+        runCmdFromIntent(getIntent(), true);
     }
 
     @Override
@@ -75,53 +96,83 @@ public class Exec extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         log("onNewIntent, taskId=" + getTaskId());
-        runCmdFromIntent(intent);
+        runCmdFromIntent(intent, true);
     }
 
-    /** 从 intent 取 cmd 并执行 —— onCreate / onNewIntent 共用 */
-    private void runCmdFromIntent(Intent intent) {
+    /**
+     * 从 intent 取 cmd 并执行
+     * @param checkPerm 是否先做 Shizuku 授权检查
+     */
+    private void runCmdFromIntent(Intent intent, boolean checkPerm) {
         final String cmd = intent == null ? null : intent.getStringExtra("content");
-        log("runCmd, cmd=" + (cmd == null ? "null" : cmd));
+        log("runCmd, checkPerm=" + checkPerm + ", cmd=" + (cmd == null ? "null" : cmd));
+
+        // ---- Shizuku 授权检查 ----
+        if (checkPerm) {
+            try {
+                if (!Shizuku.pingBinder()) {
+                    log("Shizuku not running");
+                    return;
+                }
+                if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                    log("no permission, requesting...");
+                    Shizuku.requestPermission(0);
+                    return; // 等回调里再跑
+                }
+            } catch (Exception e) {
+                log("perm check error: " + e);
+            }
+        }
+        // ---- 授权检查结束 ----
 
         if (cmd == null || cmd.isEmpty()) {
             log("UI branch");
-            runOnUiThread(() -> {
-                setTitle("执行中");
-                if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
-                        == Configuration.UI_MODE_NIGHT_NO) {
-                    setTheme(android.R.style.Theme_DeviceDefault_Light_Dialog);
-                }
-                getWindow().getAttributes().alpha = 0.85f;
-                setContentView(R.layout.exec);
-                t1 = findViewById(R.id.t1);
-                t2 = findViewById(R.id.t2);
-                t2.requestFocus();
-                t2.setOnKeyListener(new View.OnKeyListener() {
-                    @Override
-                    public boolean onKey(View view, int i, KeyEvent keyEvent) {
-                        if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                                && keyEvent.getAction() == KeyEvent.ACTION_UP) {
-                            finish();
-                        }
-                        return false;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    setTitle("执行中");
+                    if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
+                            == Configuration.UI_MODE_NIGHT_NO) {
+                        setTheme(android.R.style.Theme_DeviceDefault_Light_Dialog);
                     }
-                });
+                    getWindow().getAttributes().alpha = 0.85f;
+                    setContentView(R.layout.exec);
+                    t1 = findViewById(R.id.t1);
+                    t2 = findViewById(R.id.t2);
+                    t2.requestFocus();
+                    t2.setOnKeyListener(new View.OnKeyListener() {
+                        @Override
+                        public boolean onKey(View view, int i, KeyEvent keyEvent) {
+                            if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                                    && keyEvent.getAction() == KeyEvent.ACTION_UP) {
+                                finish();
+                            }
+                            return false;
+                        }
+                    });
+                }
             });
-            new Thread(() -> {
-                log("UI thread start exec");
-                ShizukuExec(cmd);
-                log("UI thread exec done");
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    log("UI thread start exec");
+                    ShizukuExec(cmd);
+                    log("UI thread exec done");
+                }
             }).start();
             return;
         }
 
         // 静默分支
         log("silent branch");
-        new Thread(() -> {
-            log("silent thread start");
-            ShizukuExec(cmd);
-            log("silent thread exec done");
-            // 调试期先不 finish，确认执行完再手动杀
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                log("silent thread start");
+                ShizukuExec(cmd);
+                log("silent thread exec done");
+                // 调试期不 finish，确认执行完再手动杀
+            }
         }).start();
     }
 
@@ -131,7 +182,6 @@ public class Exec extends Activity {
         log("ShizukuExec start, silent=" + silent);
 
         try {
-            // 读原息屏值
             try {
                 Process gp = Shizuku.newProcess(
                         new String[]{"settings", "get", "system", "screen_off_timeout"}, null, null);
@@ -147,7 +197,6 @@ public class Exec extends Activity {
                 log("read timeout failed: " + e);
             }
 
-            // 改息屏
             try {
                 Shizuku.newProcess(
                         new String[]{"settings", "put", "system", "screen_off_timeout", "99999"},
@@ -158,7 +207,6 @@ public class Exec extends Activity {
                 log("put timeout failed: " + e);
             }
 
-            // 执行命令
             log("starting newProcess, cmd=" + cmd);
             p = Shizuku.newProcess(new String[]{"sh"}, null, null);
             OutputStream out = p.getOutputStream();
@@ -167,49 +215,56 @@ public class Exec extends Activity {
             out.close();
             log("cmd sent");
 
-            h2 = new Thread(() -> {
-                try {
-                    BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                    String inline;
-                    while ((inline = r.readLine()) != null) {
-                        log("stdout: " + inline);
-                        if (!silent && t2 != null) {
-                            if (t2.length() > 2000 || br) break;
-                            Message msg = new Message();
-                            msg.what = 0;
-                            msg.obj = inline.equals("") ? "\n" : inline + "\n";
-                            mHandler.sendMessage(msg);
+            h2 = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                        String inline;
+                        while ((inline = r.readLine()) != null) {
+                            log("stdout: " + inline);
+                            if (!silent && t2 != null) {
+                                if (t2.length() > 2000 || br) break;
+                                Message msg = new Message();
+                                msg.what = 0;
+                                msg.obj = inline.equals("") ? "\n" : inline + "\n";
+                                mHandler.sendMessage(msg);
+                            }
                         }
+                        r.close();
+                        log("h2 done");
+                    } catch (Exception e) {
+                        log("h2 error: " + e);
                     }
-                    r.close();
-                    log("h2 done");
-                } catch (Exception e) {
-                    log("h2 error: " + e);
                 }
             });
 
-            h3 = new Thread(() -> {
-                try {
-                    BufferedReader r = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-                    String inline;
-                    while ((inline = r.readLine()) != null) {
-                        log("stderr: " + inline);
-                        if (!silent && t2 != null) {
-                            if (t2.length() > 2000 || br) break;
-                            Message msg = new Message();
-                            msg.what = 1;
-                            if (!inline.equals("")) {
-                                SpannableString ss = new SpannableString(inline + "\n");
-                                ss.setSpan(new ForegroundColorSpan(Color.RED), 0, ss.length(), SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
-                                msg.obj = ss;
+            h3 = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        BufferedReader r = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+                        String inline;
+                        while ((inline = r.readLine()) != null) {
+                            log("stderr: " + inline);
+                            if (!silent && t2 != null) {
+                                if (t2.length() > 2000 || br) break;
+                                Message msg = new Message();
+                                msg.what = 1;
+                                if (!inline.equals("")) {
+                                    SpannableString ss = new SpannableString(inline + "\n");
+                                    ss.setSpan(new ForegroundColorSpan(Color.RED),
+                                            0, ss.length(), SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
+                                    msg.obj = ss;
+                                }
+                                mHandler.sendMessage(msg);
                             }
-                            mHandler.sendMessage(msg);
                         }
+                        r.close();
+                        log("h3 done");
+                    } catch (Exception e) {
+                        log("h3 error: " + e);
                     }
-                    r.close();
-                    log("h3 done");
-                } catch (Exception e) {
-                    log("h3 error: " + e);
                 }
             });
 
@@ -219,16 +274,19 @@ public class Exec extends Activity {
             int exitCode = p.waitFor();
             log("process exited, code=" + exitCode);
 
-            h2.join();
-            h3.join();
+            try { h2.join(); } catch (InterruptedException ignored) {}
+            try { h3.join(); } catch (InterruptedException ignored) {}
             log("all threads done");
 
             if (!silent && t1 != null) {
                 final String exitValue = String.valueOf(exitCode);
                 final long elapsed = System.currentTimeMillis() - time;
-                t1.post(() -> {
-                    t1.setText(String.format("返回值：%s\n执行用时：%.2f秒", exitValue, elapsed / 1000f));
-                    setTitle("执行完毕");
+                t1.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        t1.setText(String.format("返回值：%s\n执行用时：%.2f秒", exitValue, elapsed / 1000f));
+                        setTitle("执行完毕");
+                    }
                 });
             }
 
@@ -242,6 +300,10 @@ public class Exec extends Activity {
         log("onDestroy");
         br = true;
 
+        try {
+            Shizuku.removeRequestPermissionResultListener(permListener);
+        } catch (Exception ignored) {}
+
         if (timeoutChanged) {
             try {
                 Shizuku.newProcess(
@@ -254,16 +316,19 @@ public class Exec extends Activity {
             timeoutChanged = false;
         }
 
-        new Handler().postDelayed(() -> {
-            try {
-                if (p != null) {
-                    if (Build.VERSION.SDK_INT >= 26) p.destroyForcibly();
-                    else p.destroy();
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (p != null) {
+                        if (Build.VERSION.SDK_INT >= 26) p.destroyForcibly();
+                        else p.destroy();
+                    }
+                    if (h2 != null) h2.interrupt();
+                    if (h3 != null) h3.interrupt();
+                } catch (Exception e) {
+                    log("cleanup error: " + e);
                 }
-                if (h2 != null) h2.interrupt();
-                if (h3 != null) h3.interrupt();
-            } catch (Exception e) {
-                log("cleanup error: " + e);
             }
         }, 1000);
 
