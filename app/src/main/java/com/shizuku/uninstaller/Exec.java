@@ -3,6 +3,7 @@ package com.shizuku.uninstaller;
 import android.app.Activity;
 import android.app.Service;
 import android.app.UiModeManager;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
@@ -11,6 +12,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.widget.TextView;
@@ -52,9 +54,11 @@ public class Exec extends Activity {
         }
     }
 
-    /** 写调试日志到 /data/local/tmp/exec_log.txt */
+    /** 写日志：同时落文件 + 走 logcat，双保险 */
     private void log(String msg) {
-        try (FileWriter fw = new FileWriter("/data/local/tmp/exec_log.txt", true)) {
+        Log.d("ExecDebug", msg);
+        try (FileWriter fw = new FileWriter(
+                getFilesDir() + "/exec_log.txt", true)) {
             fw.write(System.currentTimeMillis() + ": " + msg + "\n");
         } catch (Exception ignored) {}
     }
@@ -62,32 +66,46 @@ public class Exec extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        log("onCreate start");
+        log("onCreate, taskId=" + getTaskId());
+        runCmdFromIntent(getIntent());
+    }
 
-        final String cmd = getIntent().getStringExtra("content");
-        log("cmd = " + (cmd == null ? "null" : cmd));
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        log("onNewIntent, taskId=" + getTaskId());
+        runCmdFromIntent(intent);
+    }
+
+    /** 从 intent 取 cmd 并执行 —— onCreate / onNewIntent 共用 */
+    private void runCmdFromIntent(Intent intent) {
+        final String cmd = intent == null ? null : intent.getStringExtra("content");
+        log("runCmd, cmd=" + (cmd == null ? "null" : cmd));
 
         if (cmd == null || cmd.isEmpty()) {
             log("UI branch");
-            setTitle("执行中");
-            if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
-                    == Configuration.UI_MODE_NIGHT_NO) {
-                setTheme(android.R.style.Theme_DeviceDefault_Light_Dialog);
-            }
-            getWindow().getAttributes().alpha = 0.85f;
-            setContentView(R.layout.exec);
-            t1 = findViewById(R.id.t1);
-            t2 = findViewById(R.id.t2);
-            t2.requestFocus();
-            t2.setOnKeyListener(new View.OnKeyListener() {
-                @Override
-                public boolean onKey(View view, int i, KeyEvent keyEvent) {
-                    if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                            && keyEvent.getAction() == KeyEvent.ACTION_UP) {
-                        finish();
-                    }
-                    return false;
+            runOnUiThread(() -> {
+                setTitle("执行中");
+                if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
+                        == Configuration.UI_MODE_NIGHT_NO) {
+                    setTheme(android.R.style.Theme_DeviceDefault_Light_Dialog);
                 }
+                getWindow().getAttributes().alpha = 0.85f;
+                setContentView(R.layout.exec);
+                t1 = findViewById(R.id.t1);
+                t2 = findViewById(R.id.t2);
+                t2.requestFocus();
+                t2.setOnKeyListener(new View.OnKeyListener() {
+                    @Override
+                    public boolean onKey(View view, int i, KeyEvent keyEvent) {
+                        if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                                && keyEvent.getAction() == KeyEvent.ACTION_UP) {
+                            finish();
+                        }
+                        return false;
+                    }
+                });
             });
             new Thread(() -> {
                 log("UI thread start exec");
@@ -97,24 +115,23 @@ public class Exec extends Activity {
             return;
         }
 
-        // 静默分支：不建界面，但也不提前 finish
-        log("silent branch, cmd = " + cmd);
+        // 静默分支
+        log("silent branch");
         new Thread(() -> {
             log("silent thread start");
             ShizukuExec(cmd);
             log("silent thread exec done");
-            // 调试期先不 finish，确认执行完再手动杀进程
-            // finish();
+            // 调试期先不 finish，确认执行完再手动杀
         }).start();
     }
 
     public void ShizukuExec(String cmd) {
         final boolean silent = (t2 == null);
         final long time = System.currentTimeMillis();
-        log("ShizukuExec start, silent = " + silent);
+        log("ShizukuExec start, silent=" + silent);
 
         try {
-            // 先读息屏值（在执行线程里，不阻塞主线程）
+            // 读原息屏值
             try {
                 Process gp = Shizuku.newProcess(
                         new String[]{"settings", "get", "system", "screen_off_timeout"}, null, null);
@@ -122,7 +139,7 @@ public class Exec extends Activity {
                 String line = gr.readLine();
                 if (line != null && line.trim().matches("\\d+")) {
                     originalTimeout = line.trim();
-                    log("originalTimeout = " + originalTimeout);
+                    log("originalTimeout=" + originalTimeout);
                 }
                 gr.close();
                 gp.waitFor();
@@ -142,22 +159,21 @@ public class Exec extends Activity {
             }
 
             // 执行命令
-            log("starting newProcess with cmd: " + cmd);
+            log("starting newProcess, cmd=" + cmd);
             p = Shizuku.newProcess(new String[]{"sh"}, null, null);
             OutputStream out = p.getOutputStream();
             out.write((cmd + "\nexit\n").getBytes());
             out.flush();
             out.close();
-            log("cmd sent to shell");
+            log("cmd sent");
 
             h2 = new Thread(() -> {
                 try {
-                    BufferedReader mReader = new BufferedReader(
-                            new InputStreamReader(p.getInputStream()));
+                    BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
                     String inline;
-                    while ((inline = mReader.readLine()) != null) {
+                    while ((inline = r.readLine()) != null) {
                         log("stdout: " + inline);
-                        if (!silent) {
+                        if (!silent && t2 != null) {
                             if (t2.length() > 2000 || br) break;
                             Message msg = new Message();
                             msg.what = 0;
@@ -165,7 +181,7 @@ public class Exec extends Activity {
                             mHandler.sendMessage(msg);
                         }
                     }
-                    mReader.close();
+                    r.close();
                     log("h2 done");
                 } catch (Exception e) {
                     log("h2 error: " + e);
@@ -174,25 +190,23 @@ public class Exec extends Activity {
 
             h3 = new Thread(() -> {
                 try {
-                    BufferedReader mReader = new BufferedReader(
-                            new InputStreamReader(p.getErrorStream()));
+                    BufferedReader r = new BufferedReader(new InputStreamReader(p.getErrorStream()));
                     String inline;
-                    while ((inline = mReader.readLine()) != null) {
+                    while ((inline = r.readLine()) != null) {
                         log("stderr: " + inline);
-                        if (!silent) {
+                        if (!silent && t2 != null) {
                             if (t2.length() > 2000 || br) break;
                             Message msg = new Message();
                             msg.what = 1;
                             if (!inline.equals("")) {
                                 SpannableString ss = new SpannableString(inline + "\n");
-                                ss.setSpan(new ForegroundColorSpan(Color.RED),
-                                        0, ss.length(), SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
+                                ss.setSpan(new ForegroundColorSpan(Color.RED), 0, ss.length(), SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
                                 msg.obj = ss;
                             }
                             mHandler.sendMessage(msg);
                         }
                     }
-                    mReader.close();
+                    r.close();
                     log("h3 done");
                 } catch (Exception e) {
                     log("h3 error: " + e);
@@ -202,16 +216,14 @@ public class Exec extends Activity {
             h2.start();
             h3.start();
 
-            // 等进程结束
             int exitCode = p.waitFor();
-            log("process exited with code " + exitCode);
+            log("process exited, code=" + exitCode);
 
-            // 等 h2/h3 读完
-            try { h2.join(); } catch (InterruptedException e) { log("h2 join interrupted"); }
-            try { h3.join(); } catch (InterruptedException e) { log("h3 join interrupted"); }
+            h2.join();
+            h3.join();
             log("all threads done");
 
-            if (!silent) {
+            if (!silent && t1 != null) {
                 final String exitValue = String.valueOf(exitCode);
                 final long elapsed = System.currentTimeMillis() - time;
                 t1.post(() -> {
