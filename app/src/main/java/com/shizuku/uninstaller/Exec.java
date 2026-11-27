@@ -38,20 +38,11 @@ public class Exec extends Activity {
         }
 
         @Override
-        public void handleMessage(Message msg) {
-            Exec activity = mOuter.get();
-            if (activity == null || activity.t2 == null) return;
-            activity.t2.append(msg.what == 1 ? (SpannableString) msg.obj : String.valueOf(msg.obj));
-        }
-    }
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+         protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-    try {
-        Shizuku.newProcess(new String[]{"settings", "put", "system", "screen_off_timeout", "99999"}, null, null).waitFor();
-    } catch (Exception ignored) {}
-    ...
+          try {
+            Shizuku.newProcess(new String[]{"settings", "put", "system", "screen_off_timeout", "99999"}, null, null).waitFor();
+        } catch (Exception ignored) ｛｝
 }
         String cmd = getIntent().getStringExtra("content");
 
