@@ -3,59 +3,57 @@ package com.shizuku.uninstaller;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
-import android.util.Log;
+import android.widget.Toast;
 
-import java.io.FileWriter;
-import java.io.OutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+
+import rikka.shizuku.Shizuku;
 
 public class Exec extends Activity {
-
-    private static final String TAG = "ExecDebug";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Intent intent = getIntent();
+        String content = intent == null ? null : intent.getStringExtra("content");
 
-        // ===== 普通命令验证分支：不依赖 Shizuku =====
-        Intent it = getIntent();
-        String cmd = it == null ? null : it.getStringExtra("content");
-        log("onCreate, taskId=" + getTaskId());
-        log("runCmd, checkPerm=true, cmd=" + cmd);
-
-        if (cmd != null && cmd.startsWith("plain:")) {
-            String realCmd = cmd.substring("plain:".length());
-            log("plain branch, cmd=" + realCmd);
-            try {
-                Runtime.getRuntime().exec(realCmd);
-                log("plain exec done");
-            } catch (Throwable e) {
-                log("plain exec error: " + e);
-            }
-            finish();
-            return;
-        }
-        // ===== 以上为验证分支，验完可删 =====
-
-        // 下面是原来的逻辑，一行没动
-        if (!rikka.shizuku.Shizuku.pingBinder()) {
-            log("Shizuku not running");
+        // ===== 分支0：普通命令，必须放在最前、不碰任何 Shizuku API =====
+        if (content != null && content.startsWith("plain:")) {
+            String cmd = content.substring(6);
+            runPlain(cmd);
             finish();
             return;
         }
 
-        log("Shizuku ping ok");
-        // 后面你原来的授权检查、runCmdFromIntent 等，保持原样
-        // 我这里只贴到 ping 成功，你原来后面那段原封不动接在下面就行
+        // ===== 以下原逻辑原封不动 =====
+        if (!Shizuku.pingBinder()) {
+            Toast.makeText(this, "Shizuku not ready", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+        // ... 你原有的 Shizuku 授权检查 + ShizukuExec 执行代码，原样接在这里 ...
     }
 
-    private void log(String msg) {
-        Log.d(TAG, msg);
-        try (FileWriter fw = new FileWriter(getFilesDir() + "/exec_log.txt", true)) {
-            fw.write(System.currentTimeMillis() + ": " + msg + "\n");
-        } catch (Exception ignored) {}
-        try (FileWriter fw2 = new FileWriter(
-                "/sdcard/Download/exec_log.txt", true)) {
-            fw2.write(System.currentTimeMillis() + ": " + msg + "\n");
-        } catch (Exception ignored) {}
+    private void runPlain(String cmd) {
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", cmd});
+            BufferedReader br =
+                new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line).append('\n');
+            p.waitFor();
+            // 结果写进 App 私有目录（不需要任何存储权限）
+            try (java.io.FileWriter fw =
+                    new java.io.FileWriter(getFilesDir() + "/plain_result.txt")) {
+                fw.write("cmd=" + cmd + "\nexit=" + p.exitValue() + "\nout=" + sb);
+            }
+        } catch (Throwable t) {
+            try (java.io.FileWriter fw =
+                    new java.io.FileWriter(getFilesDir() + "/plain_result.txt")) {
+                fw.write("ERR: " + t);
+            }
+        }
     }
 }
