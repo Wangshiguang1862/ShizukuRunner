@@ -62,12 +62,12 @@ public class Exec extends Activity {
         setContentView(R.layout.exec);
 
         // ↓ 新增：JS 扩展分支，只认 js: 前缀，其余命令原样走原版逻辑
-        String content = getIntent().getStringExtra("content");
-        if (content != null && content.startsWith("js:")) {
-            JsRunner.run(this, content.substring(3));
-            finish();
-            return;
-        }
+        // String content = getIntent().getStringExtra("content");
+        // if (content != null && content.startsWith("js:")) {
+        //     JsRunner.run(this, content.substring(3));
+        //     finish();
+        //     return;
+        // }
         // ↑ 新增结束
 
         t1 = findViewById(R.id.t1);
