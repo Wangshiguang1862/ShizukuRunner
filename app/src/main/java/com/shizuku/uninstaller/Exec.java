@@ -198,7 +198,8 @@ public class Exec extends Activity {
             }
         }, 1000);
         super.onDestroy();
-    }
-
+     }
+        
+  }
 
 }
