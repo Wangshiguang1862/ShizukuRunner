@@ -16,6 +16,7 @@ import android.view.View;
 import android.widget.TextView;
 
 import java.io.BufferedReader;
+import java.io.FileWriter;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.ref.WeakReference;
@@ -29,7 +30,6 @@ public class Exec extends Activity {
     Thread h2, h3;
     boolean br = false;
 
-    /* 记录进入时的息屏超时，退出时恢复；读不到就用 1 分钟 */
     String originalTimeout = "60000";
     boolean timeoutChanged = false;
 
@@ -52,36 +52,23 @@ public class Exec extends Activity {
         }
     }
 
+    /** 写调试日志到 /data/local/tmp/exec_log.txt */
+    private void log(String msg) {
+        try (FileWriter fw = new FileWriter("/data/local/tmp/exec_log.txt", true)) {
+            fw.write(System.currentTimeMillis() + ": " + msg + "\n");
+        } catch (Exception ignored) {}
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // 先记住用户原来的息屏时间
-        try {
-            Process gp = Shizuku.newProcess(
-                    new String[]{"settings", "get", "system", "screen_off_timeout"}, null, null);
-            BufferedReader gr = new BufferedReader(new InputStreamReader(gp.getInputStream()));
-            String line = gr.readLine();
-            if (line != null && line.trim().matches("\\d+")) {
-                originalTimeout = line.trim();
-            }
-            gr.close();
-            gp.waitFor();
-        } catch (Exception ignored) {
-        }
-
-        // 执行期间把屏幕超时改长，防止息屏打断
-        try {
-            Shizuku.newProcess(
-                    new String[]{"settings", "put", "system", "screen_off_timeout", "99999"},
-                    null, null).waitFor();
-            timeoutChanged = true;
-        } catch (Exception ignored) {
-        }
+        log("onCreate start");
 
         final String cmd = getIntent().getStringExtra("content");
+        log("cmd = " + (cmd == null ? "null" : cmd));
 
         if (cmd == null || cmd.isEmpty()) {
+            log("UI branch");
             setTitle("执行中");
             if (((UiModeManager) getSystemService(Service.UI_MODE_SERVICE)).getNightMode()
                     == Configuration.UI_MODE_NIGHT_NO) {
@@ -102,72 +89,101 @@ public class Exec extends Activity {
                     return false;
                 }
             });
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    ShizukuExec(cmd);
-                }
+            new Thread(() -> {
+                log("UI thread start exec");
+                ShizukuExec(cmd);
+                log("UI thread exec done");
             }).start();
             return;
         }
 
-        // 有 content 时静默执行，不建界面
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                ShizukuExec(cmd);
-                finish();
-            }
+        // 静默分支：不建界面，但也不提前 finish
+        log("silent branch, cmd = " + cmd);
+        new Thread(() -> {
+            log("silent thread start");
+            ShizukuExec(cmd);
+            log("silent thread exec done");
+            // 调试期先不 finish，确认执行完再手动杀进程
+            // finish();
         }).start();
     }
 
     public void ShizukuExec(String cmd) {
         final boolean silent = (t2 == null);
         final long time = System.currentTimeMillis();
+        log("ShizukuExec start, silent = " + silent);
+
         try {
+            // 先读息屏值（在执行线程里，不阻塞主线程）
+            try {
+                Process gp = Shizuku.newProcess(
+                        new String[]{"settings", "get", "system", "screen_off_timeout"}, null, null);
+                BufferedReader gr = new BufferedReader(new InputStreamReader(gp.getInputStream()));
+                String line = gr.readLine();
+                if (line != null && line.trim().matches("\\d+")) {
+                    originalTimeout = line.trim();
+                    log("originalTimeout = " + originalTimeout);
+                }
+                gr.close();
+                gp.waitFor();
+            } catch (Exception e) {
+                log("read timeout failed: " + e);
+            }
+
+            // 改息屏
+            try {
+                Shizuku.newProcess(
+                        new String[]{"settings", "put", "system", "screen_off_timeout", "99999"},
+                        null, null).waitFor();
+                timeoutChanged = true;
+                log("timeout changed to 99999");
+            } catch (Exception e) {
+                log("put timeout failed: " + e);
+            }
+
+            // 执行命令
+            log("starting newProcess with cmd: " + cmd);
             p = Shizuku.newProcess(new String[]{"sh"}, null, null);
             OutputStream out = p.getOutputStream();
             out.write((cmd + "\nexit\n").getBytes());
             out.flush();
             out.close();
+            log("cmd sent to shell");
 
-            h2 = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        BufferedReader mReader = new BufferedReader(
-                                new InputStreamReader(p.getInputStream()));
-                        String inline;
-                        while ((inline = mReader.readLine()) != null) {
-                            if (silent) break;
+            h2 = new Thread(() -> {
+                try {
+                    BufferedReader mReader = new BufferedReader(
+                            new InputStreamReader(p.getInputStream()));
+                    String inline;
+                    while ((inline = mReader.readLine()) != null) {
+                        log("stdout: " + inline);
+                        if (!silent) {
                             if (t2.length() > 2000 || br) break;
                             Message msg = new Message();
                             msg.what = 0;
                             msg.obj = inline.equals("") ? "\n" : inline + "\n";
                             mHandler.sendMessage(msg);
                         }
-                        mReader.close();
-                    } catch (Exception ignored) {
                     }
+                    mReader.close();
+                    log("h2 done");
+                } catch (Exception e) {
+                    log("h2 error: " + e);
                 }
             });
-            h2.start();
 
-            h3 = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        BufferedReader mReader = new BufferedReader(
-                                new InputStreamReader(p.getErrorStream()));
-                        String inline;
-                        while ((inline = mReader.readLine()) != null) {
-                            if (silent) break;
+            h3 = new Thread(() -> {
+                try {
+                    BufferedReader mReader = new BufferedReader(
+                            new InputStreamReader(p.getErrorStream()));
+                    String inline;
+                    while ((inline = mReader.readLine()) != null) {
+                        log("stderr: " + inline);
+                        if (!silent) {
                             if (t2.length() > 2000 || br) break;
                             Message msg = new Message();
                             msg.what = 1;
-                            if (inline.equals("")) {
-                                msg.obj = null;
-                            } else {
+                            if (!inline.equals("")) {
                                 SpannableString ss = new SpannableString(inline + "\n");
                                 ss.setSpan(new ForegroundColorSpan(Color.RED),
                                         0, ss.length(), SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -175,60 +191,67 @@ public class Exec extends Activity {
                             }
                             mHandler.sendMessage(msg);
                         }
-                        mReader.close();
-                    } catch (Exception ignored) {
                     }
+                    mReader.close();
+                    log("h3 done");
+                } catch (Exception e) {
+                    log("h3 error: " + e);
                 }
             });
+
+            h2.start();
             h3.start();
 
-            p.waitFor();
-            final String exitValue = String.valueOf(p.exitValue());
+            // 等进程结束
+            int exitCode = p.waitFor();
+            log("process exited with code " + exitCode);
+
+            // 等 h2/h3 读完
+            try { h2.join(); } catch (InterruptedException e) { log("h2 join interrupted"); }
+            try { h3.join(); } catch (InterruptedException e) { log("h3 join interrupted"); }
+            log("all threads done");
 
             if (!silent) {
-                t1.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        t1.setText(String.format("返回值：%s\n执行用时：%.2f秒",
-                                exitValue, (System.currentTimeMillis() - time) / 1000f));
-                        setTitle("执行完毕");
-                    }
+                final String exitValue = String.valueOf(exitCode);
+                final long elapsed = System.currentTimeMillis() - time;
+                t1.post(() -> {
+                    t1.setText(String.format("返回值：%s\n执行用时：%.2f秒", exitValue, elapsed / 1000f));
+                    setTitle("执行完毕");
                 });
             }
-        } catch (Exception ignored) {
+
+        } catch (Exception e) {
+            log("ShizukuExec error: " + e);
         }
     }
 
     @Override
     protected void onDestroy() {
+        log("onDestroy");
         br = true;
 
-        // 恢复用户原来的息屏时间
         if (timeoutChanged) {
             try {
                 Shizuku.newProcess(
                         new String[]{"settings", "put", "system", "screen_off_timeout", originalTimeout},
                         null, null).waitFor();
-            } catch (Exception ignored) {
+                log("timeout restored to " + originalTimeout);
+            } catch (Exception e) {
+                log("restore timeout failed: " + e);
             }
             timeoutChanged = false;
         }
 
-        new Handler().postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (p != null) {
-                        if (Build.VERSION.SDK_INT >= 26) {
-                            p.destroyForcibly();
-                        } else {
-                            p.destroy();
-                        }
-                    }
-                    if (h2 != null) h2.interrupt();
-                    if (h3 != null) h3.interrupt();
-                } catch (Exception ignored) {
+        new Handler().postDelayed(() -> {
+            try {
+                if (p != null) {
+                    if (Build.VERSION.SDK_INT >= 26) p.destroyForcibly();
+                    else p.destroy();
                 }
+                if (h2 != null) h2.interrupt();
+                if (h3 != null) h3.interrupt();
+            } catch (Exception e) {
+                log("cleanup error: " + e);
             }
         }, 1000);
 
