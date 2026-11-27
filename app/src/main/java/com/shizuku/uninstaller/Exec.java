@@ -48,6 +48,11 @@ public class Exec extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+    try {
+        Shizuku.newProcess(new String[]{"settings", "put", "system", "screen_off_timeout", "99999"}, null, null).waitFor();
+    } catch (Exception ignored) {}
+    ...
+}
         String cmd = getIntent().getStringExtra("content");
 
         if (cmd == null || cmd.isEmpty()) {
