@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.shizuku.uninstaller">
 
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- ★ 缺这个：服务端扫不到你，Binder 永远不推 -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <application
         android:allowBackup="true"
         android:label="ShizukuRunner"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
+
+        <!-- ★ 决定你是否出现在 Shizuku 授权列表 -->
+        <meta-data
+            android:name="moe.shizuku.privileged.api.v3_support"
+            android:value="true"
+            tools:replace="android:value" />
 
         <activity
             android:name=".Exec"
@@ -18,6 +26,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ★ 缺这个：Binder 无处落地，pingBinder 永远 false -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
     </application>
 
